@@ -60,7 +60,7 @@ export function registerRoutes(app: Express, storage: Storage) {
   // Confirm requested metadata update with account signature
   app.post(basePath + "acceptMetadataRequest", async function (req, res) {
     try {
-      const { address, request, signature } = req.params;
+      const { address, request, signature } = req.query;
       if (!address || !request || !signature || typeof address !== "string" || typeof request !== "string" || typeof signature !== "string") {
         res.statusCode = 403;
         return res.end(JSON.stringify({ error: "Query params not set" }));
@@ -118,8 +118,8 @@ export function registerRoutes(app: Express, storage: Storage) {
       return res.end(JSON.stringify({ error: "X secrets not set up on this server" }));
     }
 
-    const address = req.params.address;
-    if (!isAddress(address)) {
+    const address = req.query.address;
+    if (!address || typeof address !== "string" || !isAddress(address)) {
       return malformedRequest(res, "address is not a valid address");
     }
 
