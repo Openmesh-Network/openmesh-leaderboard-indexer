@@ -164,7 +164,9 @@ export function registerRoutes(app: Express, storage: Storage) {
       .then(async ({ client: authenticatedClient }) => {
         const { data: user } = await authenticatedClient.v2.me({ "user.fields": ["username"] });
         await storage.users.update((users) => {
-          users[normalizeAddress(initialRequest.address)].metadataUpdateRequests.push({
+          const normalizedAddress = normalizeAddress(initialRequest.address);
+          createUserIfNotExists(users, normalizedAddress);
+          users[normalizedAddress].metadataUpdateRequests.push({
             metadataField: "x",
             value: user.username,
           });
