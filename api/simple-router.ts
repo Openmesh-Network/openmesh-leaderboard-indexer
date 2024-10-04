@@ -124,7 +124,9 @@ export function registerRoutes(app: Express, storage: Storage) {
     }
 
     const client = new TwitterApi({ clientId, clientSecret });
-    const { url, codeVerifier, state } = client.generateOAuth2AuthLink(`https://openrd.plopmenz.com${basePath}callbackX`, { scope: ["users.read"] });
+    const { url, codeVerifier, state } = client.generateOAuth2AuthLink(`https://openrd.plopmenz.com${basePath}callbackX`, {
+      scope: ["users.read", "tweet.read"], // https://developer.x.com/en/docs/x-api/users/lookup/api-reference/get-users-me
+    });
     await storage.xRequests.update(
       (xRequests) =>
         (xRequests[state] = {
@@ -157,7 +159,7 @@ export function registerRoutes(app: Express, storage: Storage) {
     }
 
     const client = new TwitterApi({ clientId, clientSecret });
-    client
+    const success = await client
       .loginWithOAuth2({ code, codeVerifier: initialRequest.codeVerifier, redirectUri: `https://openrd.plopmenz.com${basePath}callbackX` })
       .then(async ({ client: authenticatedClient }) => {
         const { data: user } = await authenticatedClient.v2.me({ "user.fields": ["username"] });
@@ -167,8 +169,13 @@ export function registerRoutes(app: Express, storage: Storage) {
             value: user.username,
           });
         });
+        return true;
       })
-      .catch(() => res.status(403).send("Invalid verifier or access tokens!"));
+      .catch(() => false);
+
+    if (!success) {
+      return res.status(403).send("Invalid verifier or access tokens!");
+    }
 
     res.redirect("https://openrd.openmesh.network/leaderboard");
   });
