@@ -1,5 +1,4 @@
 interface UserMetadata {
-  email?: string;
   x?: string;
 }
 

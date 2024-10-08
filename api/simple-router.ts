@@ -6,7 +6,7 @@ import { replacer } from "../utils/json.js";
 import { normalizeAddress } from "../utils/normalize-address.js";
 import { TwitterApi } from "twitter-api-v2";
 import { createUserIfNotExists } from "../utils/userUtils.js";
-import { MetadataUpdateRequest } from "../types/user.js";
+import { MetadataUpdateRequest, User } from "../types/user.js";
 
 const publicClients = [
   createPublicClient({
@@ -23,7 +23,8 @@ function malformedRequest(res: Response, error: string): void {
 }
 
 export function registerRoutes(app: Express, storage: Storage) {
-  const basePath = "/giveaway/";
+  const basePath = "/leaderboard-indexer/";
+  const websiteName = "https://openrd.openmesh.network";
   app.use(json());
 
   // Get leaderboard of a certain user
@@ -57,6 +58,23 @@ export function registerRoutes(app: Express, storage: Storage) {
     res.end(JSON.stringify(shownUsers, replacer));
   });
 
+  // Get all pending metadata requests for a given address
+  app.get(basePath + "metadataRequests/:address", async function (req, res) {
+    const address = req.params.address;
+    if (!isAddress(address)) {
+      return malformedRequest(res, "address is not a valid address");
+    }
+
+    const normalizedAddress = normalizeAddress(address);
+    const user = (await storage.users.get())[normalizedAddress];
+    if (!user) {
+      res.statusCode = 404;
+      return res.end(JSON.stringify({ error: "User not found" }));
+    }
+
+    return res.end(JSON.stringify(user.metadataUpdateRequests, replacer));
+  });
+
   // Confirm requested metadata update with account signature
   app.post(basePath + "acceptMetadataRequest", async function (req, res) {
     try {
@@ -74,7 +92,7 @@ export function registerRoutes(app: Express, storage: Storage) {
 
       const valid = await Promise.all(
         Object.values(publicClients).map((publicClient) =>
-          publicClient.verifyMessage({ address: address, message: `Accept Openmesh Giveaway metadata request: ${request}`, signature: signature })
+          publicClient.verifyMessage({ address: address, message: `Accept Openmesh Leaderboard metadata request: ${request}`, signature: signature })
         )
       );
       if (!valid.some((b) => b)) {
@@ -84,6 +102,17 @@ export function registerRoutes(app: Express, storage: Storage) {
 
       const normalizedAddress = normalizeAddress(address);
       const parsedRequest = JSON.parse(request) as MetadataUpdateRequest;
+
+      const oldUsers = await storage.users.get();
+      if (
+        Object.values(oldUsers)
+          .map((u) => u as User)
+          .some((u) => u.metadata[parsedRequest.metadataField] === parsedRequest.value)
+      ) {
+        res.statusCode = 403;
+        return res.end(JSON.stringify({ error: "Account already linked to other address" }));
+      }
+
       const user = (await storage.users.get())[normalizedAddress];
       if (!user) {
         res.statusCode = 404;
@@ -96,7 +125,7 @@ export function registerRoutes(app: Express, storage: Storage) {
 
       await storage.users.update((users) => {
         createUserIfNotExists(users, normalizedAddress);
-        const user = users[address];
+        const user = users[normalizedAddress];
         user.metadata[parsedRequest.metadataField] = parsedRequest.value;
         user.metadataUpdateRequests = user.metadataUpdateRequests.filter(
           (r) => r.metadataField !== parsedRequest.metadataField || r.value !== parsedRequest.value
@@ -124,7 +153,7 @@ export function registerRoutes(app: Express, storage: Storage) {
     }
 
     const client = new TwitterApi({ clientId, clientSecret });
-    const { url, codeVerifier, state } = client.generateOAuth2AuthLink(`https://openrd.plopmenz.com${basePath}callbackX`, {
+    const { url, codeVerifier, state } = client.generateOAuth2AuthLink(`${websiteName}${basePath}callbackX`, {
       scope: ["users.read", "tweet.read"], // https://developer.x.com/en/docs/x-api/users/lookup/api-reference/get-users-me
     });
     await storage.xRequests.update(
@@ -160,7 +189,7 @@ export function registerRoutes(app: Express, storage: Storage) {
 
     const client = new TwitterApi({ clientId, clientSecret });
     const success = await client
-      .loginWithOAuth2({ code, codeVerifier: initialRequest.codeVerifier, redirectUri: `https://openrd.plopmenz.com${basePath}callbackX` })
+      .loginWithOAuth2({ code, codeVerifier: initialRequest.codeVerifier, redirectUri: `${websiteName}${basePath}callbackX` })
       .then(async ({ client: authenticatedClient }) => {
         const { data: user } = await authenticatedClient.v2.me({ "user.fields": ["username"] });
         await storage.users.update((users) => {
@@ -179,6 +208,48 @@ export function registerRoutes(app: Express, storage: Storage) {
       return res.status(403).send("Invalid verifier or access tokens!");
     }
 
-    res.redirect("https://openrd.openmesh.network/leaderboard");
+    res.redirect(`${websiteName}/genesis`);
+  });
+
+  app.get(basePath + "droplist", async function (req, res) {
+    const droplist = await storage.droplist.get();
+    const users = await storage.users.get();
+    const extendedDroplist = droplist.map((a) => {
+      return { ...a, x: users[normalizeAddress(a.address)].metadata.x };
+    });
+
+    res.end(JSON.stringify(extendedDroplist, replacer));
+  });
+
+  app.post(basePath + "registerDroplist", async function (req, res) {
+    const address = req.query.address;
+    if (!address || typeof address !== "string" || !isAddress(address)) {
+      return malformedRequest(res, "address is not a valid address");
+    }
+
+    const normalizedAddress = normalizeAddress(address);
+    const user = (await storage.users.get())[normalizedAddress];
+    if (!user) {
+      res.statusCode = 404;
+      return res.end(JSON.stringify({ error: "User not found" }));
+    }
+
+    if (!user.metadata.x) {
+      res.statusCode = 403;
+      return res.end(JSON.stringify({ error: "User X not verified" }));
+    }
+
+    const oldDroplist = await storage.droplist.get();
+    if (oldDroplist.some((d) => d.address === normalizedAddress)) {
+      res.statusCode = 403;
+      return res.end(JSON.stringify({ error: "Address already on droplist" }));
+    }
+
+    let position = 0;
+    await storage.droplist.update((droplist) => {
+      position = droplist.push({ address: normalizedAddress, time: Date.now() });
+    });
+
+    res.end(JSON.stringify({ position }, replacer));
   });
 }
