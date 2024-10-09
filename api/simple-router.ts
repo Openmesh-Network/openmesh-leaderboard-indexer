@@ -178,6 +178,7 @@ export function registerRoutes(app: Express, storage: Storage) {
     const { state, code } = req.query;
     if (!state || !code || typeof state !== "string" || typeof code !== "string") {
       res.statusCode = 403;
+      return res.redirect(`${websiteName}/genesis`);
       return res.end(JSON.stringify({ error: "Callback query params not set" }));
     }
 
