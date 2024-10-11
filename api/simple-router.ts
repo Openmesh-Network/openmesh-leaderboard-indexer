@@ -223,6 +223,11 @@ export function registerRoutes(app: Express, storage: Storage) {
   });
 
   app.post(basePath + "registerDroplist", async function (req, res) {
+    if (Date.now() > Date.UTC(2024, 10 - 1, 11, 23, 59, 59, 999) - 11 * 60 * 60 * 1000) {
+      res.statusCode = 403;
+      return res.end(JSON.stringify({ error: "Whitelist closed" }));
+    }
+
     const address = req.query.address;
     if (!address || typeof address !== "string" || !isAddress(address)) {
       return malformedRequest(res, "address is not a valid address");
